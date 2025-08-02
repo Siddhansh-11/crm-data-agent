@@ -1,0 +1,114 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        export_default_credentials: true
+
+    - name: Configure Docker for Artifact Registry
+      run: |
+        gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+
+    - name: Get version tag
+      id: get-version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+        else
+          VERSION=${GITHUB_SHA::8}
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Build Docker image
+      run: |
+        docker build \
+          --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+          --build-arg VCS_REF=${GITHUB_SHA} \
+          --build-arg VERSION=${{ steps.get-version.outputs.version }} \
+          -t ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:${{ steps.get-version.outputs.version }} \
+          -t ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:latest .
+
+    - name: Push Docker images
+      run: |
+        docker push ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:${{ steps.get-version.outputs.version }}
+        docker push ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:latest
+
+    - name: Deploy to Cloud Run (Production)
+      run: |
+        gcloud run deploy crm-data-agent-prod \
+          --image ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:${{ steps.get-version.outputs.version }} \
+          --platform managed \
+          --region ${{ secrets.GCP_REGION }} \
+          --allow-unauthenticated \
+          --memory 2Gi \
+          --cpu 2 \
+          --min-instances 1 \
+          --max-instances 10 \
+          --set-env-vars AGENT_NAME=crm_data_agent,GOOGLE_GENAI_USE_VERTEXAI=1 \
+          --set-env-vars GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }} \
+          --set-env-vars GOOGLE_CLOUD_LOCATION=${{ secrets.GCP_REGION }} \
+          --set-env-vars AI_STORAGE_BUCKET=${{ secrets.AI_STORAGE_BUCKET }} \
+          --set-env-vars BQ_LOCATION=${{ secrets.BQ_LOCATION }} \
+          --set-env-vars SFDC_BQ_DATASET=${{ secrets.SFDC_BQ_DATASET }} \
+          --set-env-vars FIRESTORE_SESSION_DATABASE=${{ secrets.FIRESTORE_SESSION_DATABASE }} \
+          --tag ${{ steps.get-version.outputs.version }}
+
+    - name: Get deployment URL
+      id: get-url
+      run: |
+        URL=$(gcloud run services describe crm-data-agent-prod \
+          --platform managed \
+          --region ${{ secrets.GCP_REGION }} \
+          --format 'value(status.url)')
+        echo "url=$URL" >> $GITHUB_OUTPUT
+
+    - name: Run deployment verification
+      run: |
+        # Wait for deployment to be ready
+        sleep 30
+        
+        # Basic health check
+        curl -f ${{ steps.get-url.outputs.url }} || exit 1
+        
+        echo "✅ Production deployment verified"
+
+    - name: Create GitHub release (if tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## Changes in this Release
+          
+          📦 **Docker Image**: `${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:${{ steps.get-version.outputs.version }}`
+          🚀 **Production URL**: ${{ steps.get-url.outputs.url }}
+          
+          See [CHANGELOG.md](CHANGELOG.md) for detailed changes.
+        draft: false
+        prerelease: false
+
+    - name: Notify deployment success
+      run: |
+        echo "🎉 Successfully deployed to production!"
+        echo "🔗 Production URL: ${{ steps.get-url.outputs.url }}"
+        echo "📦 Image: crm-data-agent:${{ steps.get-version.outputs.version }}"

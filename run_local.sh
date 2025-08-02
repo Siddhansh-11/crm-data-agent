@@ -14,6 +14,11 @@
 # limitations under the License.
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+# Set Google Application Credentials
+export GOOGLE_APPLICATION_CREDENTIALS="${SCRIPT_DIR}/service-account-key.json"
+echo "Using service account: ${GOOGLE_APPLICATION_CREDENTIALS}"
+
 pushd "${SCRIPT_DIR}/src" &> /dev/null || exit
 uvicorn --app-dir web fast_api_runner:api_app --port 8000 & python3 web/main.py "agents/data_agent" "local" & wait
 popd &> /dev/null || exit

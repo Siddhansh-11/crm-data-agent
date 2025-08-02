@@ -1,7 +1,84 @@
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
 .local
 .venv
-data
-.env
+venv/
+ENV/
+env/
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables and secrets
+.env
+*.env
+service-account-key.json
+*.key
+*.pem
+*.crt
+
+# Logs
+*.log
+logs/
+fastapi.log
+streamlit.log
+fastapi_startup.log
+streamlit_startup.log
+streamlit_new.log
+
+# Data files
+data/
+*.csv
+*.parquet
+*.json.bak
+
+# Test files
+test_*.py
+*_test.py
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.pytest_cache/
+
+# Cloud Run and deployment
+.gcloudignore
+cloudbuild.yaml.bak
+
+# Node modules (if any)
+node_modules/

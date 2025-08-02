@@ -1,0 +1,108 @@
+name: Deploy to Staging
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened ]
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        export_default_credentials: true
+
+    - name: Configure Docker for Artifact Registry
+      run: |
+        gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:pr-${{ github.event.number }} .
+
+    - name: Push Docker image
+      run: |
+        docker push ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:pr-${{ github.event.number }}
+
+    - name: Deploy to Cloud Run (Staging)
+      run: |
+        gcloud run deploy crm-data-agent-staging-pr-${{ github.event.number }} \
+          --image ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/crm-agent/crm-data-agent:pr-${{ github.event.number }} \
+          --platform managed \
+          --region ${{ secrets.GCP_REGION }} \
+          --allow-unauthenticated \
+          --set-env-vars AGENT_NAME=crm_data_agent,GOOGLE_GENAI_USE_VERTEXAI=1 \
+          --set-env-vars GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }} \
+          --set-env-vars GOOGLE_CLOUD_LOCATION=${{ secrets.GCP_REGION }} \
+          --set-env-vars AI_STORAGE_BUCKET=${{ secrets.AI_STORAGE_BUCKET }} \
+          --set-env-vars BQ_LOCATION=${{ secrets.BQ_LOCATION }} \
+          --set-env-vars SFDC_BQ_DATASET=${{ secrets.SFDC_BQ_DATASET }} \
+          --set-env-vars FIRESTORE_SESSION_DATABASE=${{ secrets.FIRESTORE_SESSION_DATABASE }} \
+          --tag pr-${{ github.event.number }}
+
+    - name: Get deployment URL
+      id: get-url
+      run: |
+        URL=$(gcloud run services describe crm-data-agent-staging-pr-${{ github.event.number }} \
+          --platform managed \
+          --region ${{ secrets.GCP_REGION }} \
+          --format 'value(status.url)')
+        echo "url=$URL" >> $GITHUB_OUTPUT
+
+    - name: Comment PR with staging URL
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🚀 **Staging deployment ready!**
+            
+            📱 **Preview URL**: ${{ steps.get-url.outputs.url }}
+            📦 **Image**: \`crm-data-agent:pr-${{ github.event.number }}\`
+            🏷️ **Tag**: \`pr-${{ github.event.number }}\`
+            
+            This staging environment will be automatically cleaned up when the PR is closed.`
+          })
+
+  cleanup-on-close:
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    
+    steps:
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        export_default_credentials: true
+
+    - name: Delete staging deployment
+      run: |
+        gcloud run services delete crm-data-agent-staging-pr-${{ github.event.number }} \
+          --platform managed \
+          --region ${{ secrets.GCP_REGION }} \
+          --quiet || echo "Service not found or already deleted"
+
+    - name: Comment PR with cleanup message
+      uses: actions/github-script@v6
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🧹 **Staging environment cleaned up**
+            
+            The staging deployment for this PR has been automatically removed.`
+          })
