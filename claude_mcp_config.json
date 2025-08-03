@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "crm-data-agent": {
+      "command": "python3",
+      "args": [
+        "/Users/siddhanshsarkar/Google ADK - Business Intelligence/crm-data-agent/src/mcp_server/run_server.py"
+      ],
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "/Users/siddhanshsarkar/Google ADK - Business Intelligence/crm-data-agent/service-account-key.json"
+      }
+    }
+  }
+}

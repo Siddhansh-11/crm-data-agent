@@ -20,3 +20,8 @@ cloudpickle==3.1.1
 pydantic==2.11.*
 yfinance
 matplotlib
+
+# MCP Server dependencies
+mcp>=1.0.0
+httpx>=0.24.0
+anyio>=3.0.0
