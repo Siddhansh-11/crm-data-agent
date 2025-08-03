@@ -284,6 +284,9 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
             role="user"
         )
         
+        # Set MCP caller flag for BI Engineer
+        os.environ["CALLER_SOURCE"] = "mcp_claude"
+        
         # Process the query through the runner
         result_events = []
         async for event in runner.run_async(
@@ -296,6 +299,7 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
         # Extract response from events with detailed workflow tracking
         response_text = ""
         visualization_data = None
+        recharts_component = None
         sql_query = None
         workflow_steps = []
         function_calls = []
@@ -319,7 +323,21 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
             # Extract artifacts (charts, SQL)
             if event.actions and event.actions.artifact_delta:
                 for filename, version in event.actions.artifact_delta.items():
-                    if filename.endswith('.vg') or filename.endswith('.json'):
+                    if filename.endswith('.recharts.jsx'):
+                        # Recharts component for Claude
+                        try:
+                            artifact = await artifact_service.load_artifact(
+                                app_name="crm_data_agent",
+                                user_id=user_id,
+                                session_id=session_id,
+                                filename=filename,
+                                version=version
+                            )
+                            if artifact.inline_data:
+                                recharts_component = artifact.inline_data.data.decode('utf-8')
+                        except Exception as e:
+                            logger.warning(f"Could not load Recharts artifact {filename}: {e}")
+                    elif filename.endswith('.vg') or filename.endswith('.json'):
                         # This is likely a Vega-Lite chart
                         try:
                             artifact = await artifact_service.load_artifact(
@@ -357,10 +375,15 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
                 text=f"## CRM Data Analysis\n\n{response_text}"
             ))
         
-        # Add visualization if available
-        if visualization_data:
+        # Add visualization - prioritize Recharts for Claude
+        if recharts_component:
             response_parts.append(types.TextContent(
                 type="text",
+                text=f"## 📊 Interactive Visualization\n\nCreate a React artifact with this code:\n\n```jsx\n{recharts_component}\n```"
+            ))
+        elif visualization_data:
+            response_parts.append(types.TextContent(
+                type="text", 
                 text=f"## Interactive Visualization\n\n```json\n{json.dumps(visualization_data, indent=2)}\n```\n\n*This Vega-Lite specification can be rendered as an interactive chart.*"
             ))
         
@@ -378,6 +401,10 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
             type="text",
             text=f"Error analyzing CRM data: {str(e)}. Please check your question and try again."
         )]
+    finally:
+        # Clean up environment variable
+        if "CALLER_SOURCE" in os.environ:
+            del os.environ["CALLER_SOURCE"]
 
 async def handle_crm_insights(arguments: Dict[str, Any]) -> List[types.TextContent]:
     """Handle CRM insights requests"""

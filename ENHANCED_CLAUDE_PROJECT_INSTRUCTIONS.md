@@ -90,121 +90,61 @@ From the BI Engineer section, extract:
 [Extract and format the data cleanly]
 ```
 
-### 4. Native Interactive Chart Creation
-**CRITICAL**: When you find Vega-Lite JSON in the tool response:
+### 4. React Component Visualization
+**CRITICAL**: When you see a React/Recharts component in the tool response:
 
-1. **Extract the data values** from the Vega-Lite JSON `data.values` array
-2. **Identify the chart type** (bar chart, line chart, pie chart, etc.)
-3. **Extract styling preferences** (colors, dimensions, labels)
-4. **Transform to Claude native chart** using Analysis Tool capabilities
-5. **Create enhanced interactive artifact** with professional features
+**Identifying React Components:**
+- Look for messages starting with "## 📊 Interactive Visualization"
+- Followed by "Create a React artifact with this code:"
+- Contains a ```jsx code block with React/Recharts component
 
-**NEVER create Vega-Lite artifacts** - always transform to native Claude charts.
+**Your Action:**
+1. **Create React artifact immediately** with the provided code
+2. **Do NOT modify** the component code - it's optimized for your data
+3. **Set artifact type**: `application/react`
+4. **Copy the jsx code exactly** as provided
 
-**Process:**
-1. Parse the Vega-Lite JSON for data and configuration
-2. Create JavaScript code using Chart.js, Plotly.js, or similar
-3. Add interactive features (hover, zoom, filters)
-4. Create artifact with type: `text/html` containing the interactive chart
-5. Include professional styling and animations
+**NEVER transform or change the React code** - it's generated specifically for your data.
 
-**Enhanced Chart Features to Include:**
-- Hover effects showing detailed values
-- Professional color schemes
-- Responsive design
-- Interactive legends
-- Value labels on chart elements
-- Smooth animations and transitions
-
-**Example format:**
+**Example Response Pattern:**
+When you see:
 ```
-## 📊 Interactive Revenue Analysis
+## 📊 Interactive Visualization
 
-The data reveals clear patterns in your customer revenue distribution:
+Create a React artifact with this code:
 
-[CREATE NATIVE INTERACTIVE CHART ARTIFACT HERE]
-```
+```jsx
+import React from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-**Chart Type Guidelines:**
+const data = [...];
 
-**For Revenue/Customer Analysis (Horizontal Bar Charts):**
-- Use horizontal bar chart for customer rankings
-- Include currency formatting ($37.3M style)
-- Add hover tooltips with exact values
-- Use professional business color palette
-- Sort bars by value (descending)
-
-**For Time Series Analysis (Line Charts):**
-- Use line charts with markers for trend data
-- Include date formatting on x-axis
-- Add interactive zoom and pan
-- Show value labels on hover
-- Use different colors for multiple metrics
-
-**For Distribution Analysis (Pie/Donut Charts):**
-- Use for categorical breakdowns
-- Include percentage labels
-- Add legend with values
-- Interactive hover with details
-- Professional color scheme
-
-**Sample Code Structure:**
-```javascript
-// Extract data from CRM analysis
-const chartData = [/* extracted from Vega-Lite */];
-
-// Create interactive chart with enhanced features
-const chart = /* Chart.js or Plotly configuration */;
-
-// Add professional styling and interactivity
+export default function CRMChart() {
+  return (
+    <ResponsiveContainer width="100%" height={400}>
+      ...
+    </ResponsiveContainer>
+  );
+}
 ```
 
-**Specific Example for CRM Revenue Analysis:**
-When you see Vega-Lite JSON for customer revenue, transform it like this:
+**Your response should be:**
+"I'll create an interactive chart showing your analysis results."
 
-```javascript
-// Extract data from the Vega-Lite response
-const revenueData = [
-  {customer: "The Precious Boar Kitchens", revenue: 37379721.63},
-  {customer: "The Clever Cake", revenue: 37061285.06},
-  // ... other customers
-];
+Then immediately create the React artifact with the jsx code.
 
-// Create interactive horizontal bar chart
-const chart = new Chart(ctx, {
-  type: 'bar',
-  data: {
-    labels: revenueData.map(d => d.customer),
-    datasets: [{
-      label: 'Lifetime Revenue',
-      data: revenueData.map(d => d.revenue),
-      backgroundColor: 'rgba(54, 162, 235, 0.8)',
-      borderColor: 'rgba(54, 162, 235, 1)',
-      borderWidth: 1
-    }]
-  },
-  options: {
-    indexAxis: 'y', // Horizontal bars
-    responsive: true,
-    plugins: {
-      tooltip: {
-        callbacks: {
-          label: (context) => `$${(context.parsed.x/1000000).toFixed(1)}M`
-        }
-      }
-    },
-    scales: {
-      x: {
-        ticks: {
-          callback: (value) => `$${(value/1000000).toFixed(1)}M`
-        }
-      }
-    }
-  }
-});
-```
+**Why This Approach Works:**
+- React components are generated with your actual data embedded
+- Recharts is natively supported in Claude artifacts
+- No conversion or transformation needed
+- Professional styling and interactivity included
+- Responsive design works on all screen sizes
 
-This creates a professional, interactive chart that works natively in Claude.
+**Important Notes:**
+- The React code includes your actual data, not sample data
+- Chart type (bar, line, scatter) is automatically determined
+- All formatting and styling is pre-configured
+- Simply create the artifact - no modifications needed
 
 ### 5. Executive Summary Synthesis
 Extract insights and recommendations to present as:

@@ -354,6 +354,64 @@ ERROR {type(ex).__name__}: {str(ex)}
                                         data=data))
         tool_context.state["chart_image_name"] = new_image_name
 
+    # Generate Recharts component for Claude MCP calls
+    is_mcp_caller = os.environ.get("CALLER_SOURCE") == "mcp_claude"
+    
+    if is_mcp_caller:
+        # Determine chart type from Vega-Lite spec
+        vega_dict = json.loads(vega_chart_json)
+        mark_type = vega_dict.get("mark", {})
+        if isinstance(mark_type, dict):
+            mark_type = mark_type.get("type", "bar")
+        
+        # Map Vega mark to Recharts component
+        chart_map = {
+            "bar": "BarChart",
+            "line": "LineChart", 
+            "point": "ScatterChart",
+            "area": "AreaChart"
+        }
+        chart_component = chart_map.get(mark_type, "BarChart")
+        
+        # Extract fields from Vega-Lite encoding
+        encoding = vega_dict.get("encoding", {})
+        x_field = encoding.get("x", {}).get("field", "category")
+        y_field = encoding.get("y", {}).get("field", "value")
+        
+        # Determine chart element type
+        chart_element = "Bar" if chart_component == "BarChart" else "Line"
+        
+        # Generate React component
+        recharts_code = f'''import React from 'react';
+import {{ {chart_component}, {chart_element}, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer }} from 'recharts';
+
+const data = {json.dumps(df.head(50).to_dict('records'), indent=2)};
+
+export default function CRMChart() {{
+  return (
+    <ResponsiveContainer width="100%" height={{400}}>
+      <{chart_component} data={{data}} margin={{{{ top: 20, right: 30, left: 20, bottom: 5 }}}}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey="{x_field}" />
+        <YAxis />
+        <Tooltip formatter={{(value) => typeof value === 'number' ? value.toLocaleString() : value}} />
+        <Legend />
+        <{chart_element} dataKey="{y_field}" fill="#8884d8" />
+      </{chart_component}>
+    </ResponsiveContainer>
+  );
+}}'''
+        
+        # Save React component as artifact
+        recharts_filename = f"{tool_context.invocation_id}.recharts.jsx"
+        await tool_context.save_artifact(
+            filename=recharts_filename,
+            artifact=Part.from_bytes(
+                mime_type="text/javascript",
+                data=recharts_code.encode("utf-8")
+            )
+        )
+
     csv = df.head(MAX_RESULT_ROWS_DISPLAY).to_csv(index=False)
     if len(df) > MAX_RESULT_ROWS_DISPLAY:
         csv_message = f"**FIRST {MAX_RESULT_ROWS_DISPLAY} OF {len(df)} ROWS OF DATA**:"
