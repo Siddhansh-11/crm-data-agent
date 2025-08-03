@@ -16,6 +16,15 @@ The system follows a multi-agent architecture:
 - **CRM Business Analyst**: Provides business context and insights
 - **Chart Evaluator**: Validates and evaluates generated visualizations
 
+## Claude Desktop Integration
+
+The system now supports direct integration with Claude Desktop via Model Context Protocol (MCP):
+
+- **MCP Server** (`src/mcp_server/`): Exposes agent functionality to Claude Desktop
+- **Tools Available**: `analyze_crm_data` and `get_crm_insights`
+- **Interface**: Conversational AI interface through Claude Desktop
+- **Visualizations**: Vega-Lite charts rendered as Claude artifacts
+
 ## Key Dependencies
 
 - **Google ADK** (`google-adk==1.3.*`): Core agent framework
@@ -35,6 +44,18 @@ The system follows a multi-agent architecture:
 # Or manually:
 cd src
 uvicorn --app-dir web fast_api_runner:api_app --port 8000 & python3 web/main.py "agents/data_agent" "local" & wait
+```
+
+### Claude Desktop Integration (MCP)
+```bash
+# Run MCP server for Claude Desktop integration
+./run_mcp_server.sh
+
+# Test MCP server connection
+python3 test_mcp_connection.py
+
+# Quick verification test
+python3 test_quick_response.py
 ```
 
 ### Deployment
@@ -75,6 +96,7 @@ Use `src/.env-template` as a starting point.
 - `src/agents/data_agent/`: Main agent implementation and prompts
 - `src/agents/data_agent/tools/`: Agent tools (data_engineer, bi_engineer, etc.)
 - `src/web/`: Web application (FastAPI backend, Streamlit frontend)
+- `src/mcp_server/`: MCP server for Claude Desktop integration
 - `src/shared/`: Shared utilities (config, session management)
 - `metadata/`: Salesforce metadata and loaders
 - `utils/`: Deployment and utility scripts
@@ -90,9 +112,16 @@ The root agent coordinates sub-agents through `AgentTool` instances and maintain
 
 ## Data Flow
 
+### Streamlit Interface (Traditional)
 1. User query → Root Agent → determines appropriate sub-agent
 2. Data Engineer → generates SQL from natural language
 3. BigQuery → executes SQL against Salesforce data
 4. BI Engineer → creates Vega-Lite visualizations
 5. Business Analyst → provides insights and recommendations
 6. Results streamed back through FastAPI/Streamlit interface
+
+### Claude Desktop Interface (MCP)
+1. User query → MCP Server → ADK Runner → Root Agent
+2. Same multi-agent workflow (Data Engineer → BI Engineer → Business Analyst)
+3. Results formatted and sent back through MCP protocol to Claude
+4. Vega-Lite visualizations rendered as Claude artifacts

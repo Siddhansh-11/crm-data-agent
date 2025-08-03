@@ -15,9 +15,7 @@ from typing import Any, Dict, List
 
 import anyio
 from mcp.server import Server
-from mcp.server.models import InitializationOptions
 from mcp import types
-from pydantic import BaseModel
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -27,6 +25,10 @@ from shared.config_env import prepare_environment
 from shared.firestore_session_service import FirestoreSessionService
 from google.adk.sessions import Session
 from google.adk.events import Event
+from google.adk.runners import Runner
+from google.adk.artifacts import GcsArtifactService
+from google.adk.memory import InMemoryMemoryService
+from google.genai.types import Content, Part
 import uuid
 import os
 
@@ -42,23 +44,14 @@ prepare_environment()
 
 # Global variables that will be initialized when server starts
 session_service = None
+artifact_service = None
+memory_service = None
+runner = None
 initialized = False
 
 # MCP Server instance
 server = Server("crm-data-agent")
 
-class CRMQueryRequest(BaseModel):
-    """Request model for CRM data queries"""
-    question: str
-    session_id: str = None
-    user_id: str = "claude-user"
-
-class CRMQueryResponse(BaseModel):
-    """Response model for CRM data queries"""
-    answer: str
-    sql_query: str = None
-    visualization: dict = None
-    insights: List[str] = []
 
 @server.list_tools()
 async def list_tools() -> List[types.Tool]:
@@ -139,16 +132,33 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[types.TextCont
 
 async def initialize_services():
     """Initialize services when needed"""
-    global session_service, initialized, root_agent
+    global session_service, artifact_service, memory_service, runner, initialized, root_agent
     if not initialized:
         # Import agent only when needed to avoid initialization issues
         from agents.data_agent.agent import root_agent as agent
         root_agent = agent
         
+        # Initialize services
         session_service = FirestoreSessionService(
             database=os.environ.get("FIRESTORE_SESSION_DATABASE", "(default)"),
             project_id=os.environ.get("GOOGLE_CLOUD_PROJECT")
         )
+        
+        artifact_service = GcsArtifactService(
+            bucket_name=os.environ.get("AI_STORAGE_BUCKET", "my-crm-agent-assets-101")
+        )
+        
+        memory_service = InMemoryMemoryService()
+        
+        # Create runner
+        runner = Runner(
+            app_name="crm_data_agent",
+            agent=root_agent,
+            artifact_service=artifact_service,
+            session_service=session_service,
+            memory_service=memory_service
+        )
+        
         initialized = True
 
 async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextContent]:
@@ -169,17 +179,27 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
     app_name = "crm_data_agent"
     
     try:
+        # Create session first
         session = await session_service.create_session(
             app_name=app_name,
             user_id=user_id,
             session_id=session_id
         )
         
-        # Process the query through the existing agent
+        # Create Content object for the message
+        content = Content(
+            parts=[Part.from_text(text=question)],
+            role="user"
+        )
+        
+        # Process the query through the runner
         result_events = []
-        async for event in root_agent.run_iter(question, session):
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=content
+        ):
             result_events.append(event)
-            await session_service.append_event(session, event)
         
         # Extract response from events
         response_text = ""
@@ -187,10 +207,13 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
         sql_query = None
         
         for event in result_events:
-            if event.message and event.message.content:
-                for content in event.message.content:
-                    if hasattr(content, 'text') and content.text:
-                        response_text += content.text
+            # Process events with content (following Streamlit pattern)
+            if event.content and event.content.parts:
+                # Only process model responses, skip user events
+                if event.content.role == "model":
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            response_text += part.text
             
             # Extract artifacts (charts, SQL)
             if event.actions and event.actions.artifact_delta:
@@ -198,10 +221,8 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
                     if filename.endswith('.vg') or filename.endswith('.json'):
                         # This is likely a Vega-Lite chart
                         try:
-                            from google.adk.artifacts import GcsArtifactService
-                            artifact_service = GcsArtifactService()
                             artifact = await artifact_service.load_artifact(
-                                app_name=app_name,
+                                app_name="crm_data_agent",
                                 user_id=user_id,
                                 session_id=session_id,
                                 filename=filename,
@@ -262,21 +283,14 @@ async def handle_crm_insights(arguments: Dict[str, Any]) -> List[types.TextConte
 async def main():
     """Main entry point for the MCP server"""
     # Use stdio transport for Claude Desktop integration
-    async with anyio.create_task_group() as tg:
-        async with anyio.abc.AsyncResource.use(
-            server.run(
-                transport=anyio.lowlevel.FdTransport(sys.stdin, sys.stdout),
-                initialization_options=InitializationOptions(
-                    server_name="crm-data-agent",
-                    server_version="1.0.0",
-                    capabilities=server.get_capabilities(
-                        notification_options=None,
-                        experimental_capabilities={}
-                    )
-                )
-            )
-        ):
-            await anyio.sleep_forever()
+    from mcp.server.stdio import stdio_server
+    
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options()
+        )
 
 if __name__ == "__main__":
     asyncio.run(main())

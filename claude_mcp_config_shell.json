@@ -1,0 +1,60 @@
+{
+  "mcpServers": {
+    "n8n-workflows Docs": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://gitmcp.io/Zie619/n8n-workflows"
+      ]
+    },
+    "Context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"]
+    },
+    "n8n-mcp": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--init",
+        "-e", "MCP_MODE=stdio",
+        "-e", "LOG_LEVEL=error",
+        "-e", "DISABLE_CONSOLE_OUTPUT=true",
+        "-e", "N8N_API_URL=http://host.docker.internal:5678",
+        "-e", "N8N_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlZjVlN2NjNS1iOWRjLTRlODYtOWEwMC02ODBhMDE4NjE1MTciLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzUzMTUwNzEwLCJleHAiOjE3NTU2NjI0MDB9.3yl5dXBrzjqBJjiYKHW5paiGcZuUM7KmeNvHEW6BKBY",
+        "ghcr.io/czlonkowski/n8n-mcp:latest"
+      ]
+    },
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--read-only",
+        "--project-ref=pgypggvqcrhnbhurptgb"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "sbp_f0ef45c0ead2ac7c67da3c2a1e383e8ff107e7e6"
+      }
+    },
+    "github": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "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"
+      }
+    },
+    "crm-data-agent": {
+      "command": "/Users/siddhanshsarkar/Google ADK - Business Intelligence/crm-data-agent/run_mcp_server.sh",
+      "args": []
+    }
+  }
+}
