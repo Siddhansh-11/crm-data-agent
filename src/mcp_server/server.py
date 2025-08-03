@@ -52,6 +52,98 @@ initialized = False
 # MCP Server instance
 server = Server("crm-data-agent")
 
+def format_agent_workflow(question: str, function_calls: list, function_responses: list, final_response: str) -> str:
+    """Format the multi-agent workflow into a rich, demo-ready response for Claude"""
+    
+    workflow_content = f"# 🤖 Multi-Agent CRM Analysis Workflow\n\n"
+    workflow_content += f"**Question**: {question}\n\n"
+    workflow_content += "---\n\n"
+    
+    # Process function calls and responses in order
+    agent_steps = {}
+    
+    # Map function calls to their responses
+    for fc in function_calls:
+        agent_name = fc.name
+        if agent_name not in agent_steps:
+            agent_steps[agent_name] = {'call': fc, 'response': None}
+    
+    for fr in function_responses:
+        agent_name = fr.name
+        if agent_name in agent_steps:
+            agent_steps[agent_name]['response'] = fr
+    
+    # Format each agent step
+    agent_icons = {
+        'crm_business_analyst': '📊 **Business Analyst**',
+        'data_engineer': '⚡ **Data Engineer**', 
+        'bi_engineer_tool': '📈 **BI Engineer**'
+    }
+    
+    step_num = 1
+    for agent_name, step_data in agent_steps.items():
+        agent_title = agent_icons.get(agent_name, f"🔧 **{agent_name}**")
+        workflow_content += f"## Step {step_num}: {agent_title}\n\n"
+        
+        # Show agent input/request
+        if step_data['call'] and hasattr(step_data['call'], 'args'):
+            workflow_content += "### 📥 Input:\n"
+            args = step_data['call'].args
+            if isinstance(args, dict):
+                for key, value in args.items():
+                    # Truncate very long values for readability
+                    if isinstance(value, str) and len(value) > 200:
+                        value = value[:200] + "..."
+                    workflow_content += f"- **{key}**: {value}\n"
+            else:
+                workflow_content += f"```\n{args}\n```\n"
+            workflow_content += "\n"
+        
+        # Show agent response/output
+        if step_data['response'] and hasattr(step_data['response'], 'response'):
+            workflow_content += "### 📤 Output:\n"
+            response_data = step_data['response'].response
+            
+            # Handle different response formats
+            if isinstance(response_data, dict):
+                # Pretty format structured responses (like from data_engineer)
+                if 'sql_code' in response_data:
+                    workflow_content += "**SQL Query Generated:**\n"
+                    workflow_content += f"```sql\n{response_data['sql_code']}\n```\n\n"
+                if 'sql_code_file_name' in response_data:
+                    workflow_content += f"**File**: `{response_data['sql_code_file_name']}`\n\n"
+                if 'result' in response_data:
+                    workflow_content += "**Analysis Result:**\n"
+                    result_text = response_data['result']
+                    if len(result_text) > 500:
+                        result_text = result_text[:500] + "...\n\n*[Truncated for readability]*"
+                    workflow_content += f"{result_text}\n\n"
+            elif isinstance(response_data, str):
+                # Handle text responses (like from business analyst)
+                if len(response_data) > 500:
+                    response_data = response_data[:500] + "...\n\n*[Truncated for readability]*"
+                workflow_content += f"{response_data}\n\n"
+            else:
+                workflow_content += f"```\n{response_data}\n```\n\n"
+        
+        workflow_content += "---\n\n"
+        step_num += 1
+    
+    # Add final integrated analysis
+    if final_response:
+        workflow_content += f"## 🎯 Final Integrated Analysis\n\n{final_response}\n\n"
+        workflow_content += "---\n\n"
+    
+    workflow_content += "## 💡 Workflow Summary\n\n"
+    workflow_content += "This analysis demonstrates our sophisticated **multi-agent architecture**:\n\n"
+    workflow_content += "1. 📊 **Business Analyst** interpreted your question and defined the analytical approach\n"
+    workflow_content += "2. ⚡ **Data Engineer** generated optimized SQL queries and executed them against BigQuery\n"
+    workflow_content += "3. 📈 **BI Engineer** processed the data and created visualizations\n"
+    workflow_content += "4. 🤖 **Root Agent** synthesized all inputs into actionable business insights\n\n"
+    workflow_content += "*Each agent specializes in their domain, ensuring expert-level analysis at every step.*"
+    
+    return workflow_content
+
 
 @server.list_tools()
 async def list_tools() -> List[types.Tool]:
@@ -201,10 +293,13 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
         ):
             result_events.append(event)
         
-        # Extract response from events
+        # Extract response from events with detailed workflow tracking
         response_text = ""
         visualization_data = None
         sql_query = None
+        workflow_steps = []
+        function_calls = []
+        function_responses = []
         
         for event in result_events:
             # Process events with content (following Streamlit pattern)
@@ -214,6 +309,12 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
                     for part in event.content.parts:
                         if hasattr(part, 'text') and part.text:
                             response_text += part.text
+                        
+                        # Extract function calls and responses (like Streamlit)
+                        if hasattr(part, 'function_call') and part.function_call:
+                            function_calls.append(part.function_call)
+                        elif hasattr(part, 'function_response') and part.function_response:
+                            function_responses.append(part.function_response)
             
             # Extract artifacts (charts, SQL)
             if event.actions and event.actions.artifact_delta:
@@ -237,11 +338,20 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
                         except Exception as e:
                             logger.warning(f"Could not load artifact {filename}: {e}")
         
-        # Format response for Claude
+        # Format rich workflow response for Claude
         response_parts = []
         
-        # Add main analysis
-        if response_text:
+        # Add detailed workflow if we have function calls/responses
+        if function_calls or function_responses:
+            workflow_content = format_agent_workflow(
+                question, function_calls, function_responses, response_text
+            )
+            response_parts.append(types.TextContent(
+                type="text",
+                text=workflow_content
+            ))
+        elif response_text:
+            # Fallback to basic response if no workflow details
             response_parts.append(types.TextContent(
                 type="text",
                 text=f"## CRM Data Analysis\n\n{response_text}"
