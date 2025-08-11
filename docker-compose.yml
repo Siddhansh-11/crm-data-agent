@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # Main CRM Data Agent service
+  crm-data-agent:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: crm-data-agent
+    ports:
+      - "8000:8000"  # Web interface
+    environment:
+      - AGENT_NAME=crm_data_agent
+      - GOOGLE_GENAI_USE_VERTEXAI=1
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
+      - AI_STORAGE_BUCKET=${AI_STORAGE_BUCKET}
+      - BQ_LOCATION=${BQ_LOCATION:-US}
+      - SFDC_BQ_DATASET=${SFDC_BQ_DATASET:-sfdc_data}
+      - FIRESTORE_SESSION_DATABASE=${FIRESTORE_SESSION_DATABASE}
+      - SFDC_METADATA_FILE=${SFDC_METADATA_FILE:-sfdc_metadata.json}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key.json
+    volumes:
+      - ./service-account-key.json:/app/service-account-key.json:ro
+      - ./src/.env:/app/.env:ro
+      - ./src/agents/data_agent/sfdc_metadata.json:/app/agents/data_agent/sfdc_metadata.json:ro
+    command: >
+      sh -c "uvicorn --app-dir web fast_api_runner:api_app --host 0.0.0.0 --port 8000 --reload &
+             python3 web/main.py agents/data_agent local &
+             wait"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # MCP Server service (for Claude Desktop integration)
+  mcp-server:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: crm-mcp-server
+    ports:
+      - "8080:8080"  # MCP server port
+    environment:
+      - AGENT_NAME=crm_data_agent
+      - GOOGLE_GENAI_USE_VERTEXAI=1
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
+      - AI_STORAGE_BUCKET=${AI_STORAGE_BUCKET}
+      - BQ_LOCATION=${BQ_LOCATION:-US}
+      - SFDC_BQ_DATASET=${SFDC_BQ_DATASET:-sfdc_data}
+      - FIRESTORE_SESSION_DATABASE=${FIRESTORE_SESSION_DATABASE}
+      - SFDC_METADATA_FILE=${SFDC_METADATA_FILE:-sfdc_metadata.json}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key.json
+    volumes:
+      - ./service-account-key.json:/app/service-account-key.json:ro
+      - ./src/.env:/app/.env:ro
+      - ./src/agents/data_agent/sfdc_metadata.json:/app/agents/data_agent/sfdc_metadata.json:ro
+    command: ["python3", "mcp_server/run_server.py"]
+    restart: unless-stopped
+    profiles:
+      - mcp  # Only start with --profile mcp
+
+  # Development service with hot reload and volume mounts
+  crm-data-agent-dev:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: crm-data-agent-dev
+    ports:
+      - "8001:8000"  # Different port for dev
+    environment:
+      - AGENT_NAME=crm_data_agent
+      - GOOGLE_GENAI_USE_VERTEXAI=1
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - GOOGLE_CLOUD_LOCATION=${GOOGLE_CLOUD_LOCATION:-us-central1}
+      - AI_STORAGE_BUCKET=${AI_STORAGE_BUCKET}
+      - BQ_LOCATION=${BQ_LOCATION:-US}
+      - SFDC_BQ_DATASET=${SFDC_BQ_DATASET:-sfdc_data}
+      - FIRESTORE_SESSION_DATABASE=${FIRESTORE_SESSION_DATABASE}
+      - SFDC_METADATA_FILE=${SFDC_METADATA_FILE:-sfdc_metadata.json}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key.json
+    volumes:
+      - ./src:/app:rw  # Full source mount for development
+      - ./service-account-key.json:/app/service-account-key.json:ro
+    command: >
+      sh -c "uvicorn --app-dir web fast_api_runner:api_app --host 0.0.0.0 --port 8000 --reload &
+             python3 web/main.py agents/data_agent local &
+             wait"
+    profiles:
+      - dev  # Only start with --profile dev
+
+# Networks
+networks:
+  default:
+    name: crm-data-agent-network

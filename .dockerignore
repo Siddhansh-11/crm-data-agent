@@ -1,0 +1,102 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+fastapi_startup.log
+streamlit_startup.log
+
+# Test files
+test_*.py
+*_test.py
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation (keep essential docs only)
+*.md
+!README.md
+!CLAUDE.md
+
+# Data files (exclude large datasets)
+data/sample-data/
+*.parquet
+*.csv
+*.json.gz
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Cloud credentials (security)
+service-account-key.json
+*.pem
+*.key
+
+# Application specific
+tutorial/
+docs/
+
+# Large dependencies cache
+.cache/
+.pip/
