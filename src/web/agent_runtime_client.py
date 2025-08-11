@@ -152,12 +152,11 @@ class FastAPIEngineRuntime(AgentRuntime):
                         # trying to parse as if it was a json with "error" field.
                         err_json = json.loads(event_str)
                         if "error" in err_json:
-                            print(f"#### RUNTIME ERROR: {err_json['error']}")
+                            logger.error(f"Runtime error: {err_json['error']}")
                             continue
                     except json.JSONDecodeError:
-                        print(f"VALIDATION ERROR: {e}")
-                        print("### DATA ###:\n" + event_str)
-                        print("\n\n######################################\n\n")
+                        logger.error(f"Validation error: {e}")
+                        logger.debug(f"Invalid event data: {event_str}")
                         pass
         finally:
             self.streaming = False

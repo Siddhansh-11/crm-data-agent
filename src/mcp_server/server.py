@@ -7,6 +7,8 @@ allowing Claude to interact with the multi-agent system for business intelligenc
 """
 
 import asyncio
+import contextlib
+from io import StringIO
 import json
 import logging
 import sys
@@ -51,6 +53,16 @@ initialized = False
 
 # MCP Server instance
 server = Server("crm-data-agent")
+
+@contextlib.contextmanager
+def capture_stdout():
+    """Capture stdout to prevent print statements from interfering with JSON output"""
+    old_stdout = sys.stdout
+    sys.stdout = StringIO()
+    try:
+        yield sys.stdout
+    finally:
+        sys.stdout = old_stdout
 
 def format_agent_workflow(question: str, function_calls: list, function_responses: list, final_response: str) -> str:
     """Format the multi-agent workflow into a rich, demo-ready response for Claude"""
@@ -217,9 +229,14 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[types.TextCont
             raise ValueError(f"Unknown tool: {name}")
     except Exception as e:
         logger.error(f"Error in tool call {name}: {str(e)}")
+        error_response = {
+            "error": "Error processing request",
+            "tool": name,
+            "message": str(e)
+        }
         return [types.TextContent(
             type="text",
-            text=f"Error processing request: {str(e)}"
+            text=json.dumps(error_response, indent=2)
         )]
 
 async def initialize_services():
@@ -270,141 +287,168 @@ async def handle_crm_analysis(arguments: Dict[str, Any]) -> List[types.TextConte
     user_id = "claude-user"
     app_name = "crm_data_agent"
     
-    try:
-        # Create session first
-        session = await session_service.create_session(
-            app_name=app_name,
-            user_id=user_id,
-            session_id=session_id
-        )
-        
-        # Create Content object for the message
-        content = Content(
-            parts=[Part.from_text(text=question)],
-            role="user"
-        )
-        
-        # Set MCP caller flag for BI Engineer
-        os.environ["CALLER_SOURCE"] = "mcp_claude"
-        
-        # Process the query through the runner
-        result_events = []
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=session_id,
-            new_message=content
-        ):
-            result_events.append(event)
-        
-        # Extract response from events with detailed workflow tracking
-        response_text = ""
-        visualization_data = None
-        recharts_component = None
-        sql_query = None
-        workflow_steps = []
-        function_calls = []
-        function_responses = []
-        
-        for event in result_events:
-            # Process events with content (following Streamlit pattern)
-            if event.content and event.content.parts:
-                # Only process model responses, skip user events
-                if event.content.role == "model":
-                    for part in event.content.parts:
-                        if hasattr(part, 'text') and part.text:
-                            response_text += part.text
-                        
-                        # Extract function calls and responses (like Streamlit)
-                        if hasattr(part, 'function_call') and part.function_call:
-                            function_calls.append(part.function_call)
-                        elif hasattr(part, 'function_response') and part.function_response:
-                            function_responses.append(part.function_response)
-            
-            # Extract artifacts (charts, SQL)
-            if event.actions and event.actions.artifact_delta:
-                for filename, version in event.actions.artifact_delta.items():
-                    if filename.endswith('.recharts.jsx'):
-                        # Recharts component for Claude
-                        try:
-                            artifact = await artifact_service.load_artifact(
-                                app_name="crm_data_agent",
-                                user_id=user_id,
-                                session_id=session_id,
-                                filename=filename,
-                                version=version
-                            )
-                            if artifact.inline_data:
-                                recharts_component = artifact.inline_data.data.decode('utf-8')
-                        except Exception as e:
-                            logger.warning(f"Could not load Recharts artifact {filename}: {e}")
-                    elif filename.endswith('.vg') or filename.endswith('.json'):
-                        # This is likely a Vega-Lite chart
-                        try:
-                            artifact = await artifact_service.load_artifact(
-                                app_name="crm_data_agent",
-                                user_id=user_id,
-                                session_id=session_id,
-                                filename=filename,
-                                version=version
-                            )
-                            if artifact.inline_data:
-                                viz_text = artifact.inline_data.data.decode('utf-8')
-                                try:
-                                    visualization_data = json.loads(viz_text)
-                                except json.JSONDecodeError:
-                                    pass
-                        except Exception as e:
-                            logger.warning(f"Could not load artifact {filename}: {e}")
-        
-        # Format rich workflow response for Claude
-        response_parts = []
-        
-        # Add detailed workflow if we have function calls/responses
-        if function_calls or function_responses:
-            workflow_content = format_agent_workflow(
-                question, function_calls, function_responses, response_text
+    MAX_RETRIES = 3
+    last_error = None
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Create session first
+            session = await session_service.create_session(
+                app_name=app_name,
+                user_id=user_id,
+                session_id=session_id
             )
-            response_parts.append(types.TextContent(
-                type="text",
-                text=workflow_content
-            ))
-        elif response_text:
-            # Fallback to basic response if no workflow details
-            response_parts.append(types.TextContent(
-                type="text",
-                text=f"## CRM Data Analysis\n\n{response_text}"
-            ))
-        
-        # Add visualization - prioritize Recharts for Claude
-        if recharts_component:
-            response_parts.append(types.TextContent(
-                type="text",
-                text=f"## 📊 Interactive Visualization\n\nCreate a React artifact with this code:\n\n```jsx\n{recharts_component}\n```"
-            ))
-        elif visualization_data:
-            response_parts.append(types.TextContent(
-                type="text", 
-                text=f"## Interactive Visualization\n\n```json\n{json.dumps(visualization_data, indent=2)}\n```\n\n*This Vega-Lite specification can be rendered as an interactive chart.*"
-            ))
-        
-        if not response_parts:
-            response_parts.append(types.TextContent(
-                type="text",
-                text="Analysis completed, but no response was generated. Please try rephrasing your question."
-            ))
             
-        return response_parts
+            # Create Content object for the message
+            content = Content(
+                parts=[Part.from_text(text=question)],
+                role="user"
+            )
+            
+            # Set MCP caller flag for BI Engineer
+            os.environ["CALLER_SOURCE"] = "mcp_claude"
+            
+            # Process the query through the runner with stdout capture
+            result_events = []
+            with capture_stdout() as captured:
+                async for event in runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=content
+                ):
+                    result_events.append(event)
+            
+            # Log any captured output for debugging
+            captured_output = captured.getvalue()
+            if captured_output:
+                logger.debug(f"Captured stdout during agent execution: {captured_output}")
         
-    except Exception as e:
-        logger.error(f"Error processing CRM analysis: {str(e)}")
-        return [types.TextContent(
-            type="text",
-            text=f"Error analyzing CRM data: {str(e)}. Please check your question and try again."
-        )]
-    finally:
-        # Clean up environment variable
-        if "CALLER_SOURCE" in os.environ:
-            del os.environ["CALLER_SOURCE"]
+            # Extract response from events with detailed workflow tracking
+            response_text = ""
+            visualization_data = None
+            recharts_component = None
+            sql_query = None
+            workflow_steps = []
+            function_calls = []
+            function_responses = []
+        
+            for event in result_events:
+                # Process events with content (following Streamlit pattern)
+                if event.content and event.content.parts:
+                    # Only process model responses, skip user events
+                    if event.content.role == "model":
+                        for part in event.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                response_text += part.text
+                            
+                            # Extract function calls and responses (like Streamlit)
+                            if hasattr(part, 'function_call') and part.function_call:
+                                function_calls.append(part.function_call)
+                            elif hasattr(part, 'function_response') and part.function_response:
+                                function_responses.append(part.function_response)
+                
+                # Extract artifacts (charts, SQL)
+                if event.actions and event.actions.artifact_delta:
+                    for filename, version in event.actions.artifact_delta.items():
+                        if filename.endswith('.recharts.jsx'):
+                            # Recharts component for Claude
+                            try:
+                                artifact = await artifact_service.load_artifact(
+                                    app_name="crm_data_agent",
+                                    user_id=user_id,
+                                    session_id=session_id,
+                                    filename=filename,
+                                    version=version
+                                )
+                                if artifact.inline_data:
+                                    recharts_component = artifact.inline_data.data.decode('utf-8')
+                            except Exception as e:
+                                logger.warning(f"Could not load Recharts artifact {filename}: {e}")
+                        elif filename.endswith('.vg') or filename.endswith('.json'):
+                            # This is likely a Vega-Lite chart
+                            try:
+                                artifact = await artifact_service.load_artifact(
+                                    app_name="crm_data_agent",
+                                    user_id=user_id,
+                                    session_id=session_id,
+                                    filename=filename,
+                                    version=version
+                                )
+                                if artifact.inline_data:
+                                    viz_text = artifact.inline_data.data.decode('utf-8')
+                                    try:
+                                        visualization_data = json.loads(viz_text)
+                                    except json.JSONDecodeError:
+                                        pass
+                            except Exception as e:
+                                logger.warning(f"Could not load artifact {filename}: {e}")
+        
+            # Format rich workflow response for Claude
+            response_parts = []
+        
+            # Add detailed workflow if we have function calls/responses
+            if function_calls or function_responses:
+                workflow_content = format_agent_workflow(
+                    question, function_calls, function_responses, response_text
+                )
+                response_parts.append(types.TextContent(
+                    type="text",
+                    text=workflow_content
+                ))
+            elif response_text:
+                # Fallback to basic response if no workflow details
+                response_parts.append(types.TextContent(
+                    type="text",
+                    text=f"## CRM Data Analysis\n\n{response_text}"
+                ))
+        
+            # Add visualization - prioritize Recharts for Claude
+            if recharts_component:
+                response_parts.append(types.TextContent(
+                    type="text",
+                    text=f"## 📊 Interactive Visualization\n\nCreate a React artifact with this code:\n\n```jsx\n{recharts_component}\n```"
+                ))
+            elif visualization_data:
+                response_parts.append(types.TextContent(
+                    type="text", 
+                    text=f"## Interactive Visualization\n\n```json\n{json.dumps(visualization_data, indent=2)}\n```\n\n*This Vega-Lite specification can be rendered as an interactive chart.*"
+                ))
+        
+            if not response_parts:
+                response_parts.append(types.TextContent(
+                    type="text",
+                    text="Analysis completed, but no response was generated. Please try rephrasing your question."
+                ))
+            
+            return response_parts
+            
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+            
+            if attempt < MAX_RETRIES - 1:
+                logger.info(f"Retrying... (attempt {attempt + 2}/{MAX_RETRIES})")
+                # Wait a bit before retrying
+                await asyncio.sleep(1)
+                # Generate new session ID for retry
+                session_id = str(uuid.uuid4())
+            else:
+                logger.error(f"All {MAX_RETRIES} attempts failed")
+        finally:
+            # Clean up environment variable
+            if "CALLER_SOURCE" in os.environ:
+                del os.environ["CALLER_SOURCE"]
+    
+    # If we get here, all retries failed
+    error_response = {
+        "error": "Error analyzing CRM data after multiple attempts",
+        "message": str(last_error) if last_error else "Unknown error",
+        "suggestion": "Please check your question and try again. The system may be experiencing issues."
+    }
+    return [types.TextContent(
+        type="text",
+        text=json.dumps(error_response, indent=2)
+    )]
 
 async def handle_crm_insights(arguments: Dict[str, Any]) -> List[types.TextContent]:
     """Handle CRM insights requests"""

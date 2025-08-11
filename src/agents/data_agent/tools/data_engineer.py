@@ -15,6 +15,7 @@
 
 from functools import cache
 import json
+import logging
 import os
 from pathlib import Path
 import uuid
@@ -40,6 +41,9 @@ from prompts.sql_correction import (instruction as sql_correction_instruction,
 DATA_ENGINEER_AGENT_MODEL_ID = "gemini-2.5-pro" # "gemini-2.5-pro-preview-05-06"
 SQL_VALIDATOR_MODEL_ID =  "gemini-2.5-pro" # "gemini-2.5-pro-preview-05-06"
 _DEFAULT_METADATA_FILE = "sfdc_metadata.json"
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 @cache
 def _init_environment():
@@ -89,7 +93,7 @@ def _sql_validator(sql_code: str) -> Tuple[str, str]:
             str: "SUCCESS" if SQL is valid, error text otherwise.
             str: modified SQL code (always update your original query with it).
     """
-    print("Running SQL validator.")
+    logger.info("Running SQL validator.")
     sql_code_to_run = sql_code
     for k,v in _sfdc_metadata_dict.items():
         sfdc_name = v["salesforce_name"]
@@ -163,7 +167,7 @@ async def data_engineer(request: str, tool_context: ToolContext) -> SQLResult:
     sql_result: SQLResult = sql_code_result.parsed # type: ignore
     sql = sql_result.sql_code
 
-    print(f"SQL Query candidate: {sql}")
+    logger.debug(f"SQL Query candidate: {sql}")
 
     MAX_FIX_ATTEMPTS = 32
     validating_query = sql
@@ -172,11 +176,11 @@ async def data_engineer(request: str, tool_context: ToolContext) -> SQLResult:
     for __ in range(MAX_FIX_ATTEMPTS):
         chat_session = None
         validator_result, validating_query = _sql_validator(validating_query)
-        print(f"SQL Query candidate: {validating_query}")
+        logger.debug(f"SQL Query candidate: {validating_query}")
         if validator_result == "SUCCESS":
             is_good = True
             break
-        print(f"ERROR: {validator_result}")
+        logger.warning(f"SQL validation error: {validator_result}")
         if not chat_session:
             chat_session = get_genai_client().chats.create(
                 model=SQL_VALIDATOR_MODEL_ID,
@@ -206,7 +210,8 @@ async def data_engineer(request: str, tool_context: ToolContext) -> SQLResult:
         corr_result = chat_session.send_message(correcting_prompt).parsed
         validating_query = corr_result.sql_code # type: ignore
     if is_good:
-        print(f"Final result: {validating_query}")
+        logger.info(f"Final SQL query generated successfully")
+        logger.debug(f"Final query: {validating_query}")
         # sql_markdown = f"```sql\n{validating_query}\n```"
         sql_file_prefix = f"query_{uuid.uuid4().hex}"
         # await tool_context.save_artifact(

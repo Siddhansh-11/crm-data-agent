@@ -17,6 +17,8 @@ from datetime import date, datetime
 from functools import cache
 import io
 import json
+import logging
+import math
 import os
 
 from pydantic import BaseModel
@@ -43,6 +45,9 @@ from tools.chart_evaluator import evaluate_chart
 MAX_RESULT_ROWS_DISPLAY = 50
 BI_ENGINEER_AGENT_MODEL_ID = "gemini-2.5-pro" # "gemini-2.5-pro-preview-05-06"
 BI_ENGINEER_FIX_AGENT_MODEL_ID = "gemini-2.5-pro" # "gemini-2.5-pro-preview-05-06"
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 @cache
@@ -72,21 +77,21 @@ def _enhance_parameters(vega_chart: dict, df: pd.DataFrame) -> dict:
     if "params" not in vega_chart:
         return vega_chart
     if "params" not in vega_chart or "'transform':" not in str(vega_chart):
-        print("Cannot enhance parameters because one or "
-              "more of these are missing: "
-              "[params, transform]")
+        logger.warning("Cannot enhance parameters because one or "
+                      "more of these are missing: "
+                      "[params, transform]")
         return vega_chart
-    print("Enhancing parameters...")
+    logger.info("Enhancing parameters...")
     params_list = vega_chart["params"]
     params = { p["name"]: p for p in params_list }
     for p in params:
         if not p.endswith("__selection"):
             continue
-        print(f"Parameter {p}")
+        logger.debug(f"Processing parameter: {p}")
         param_dict = params[p]
         column_name = p.split("__selection")[0]
         if column_name not in df.columns:
-            print(f"Column {column_name} not found in dataframe.")
+            logger.warning(f"Column {column_name} not found in dataframe.")
             continue
         field_values = df[column_name].unique().tolist()
         if None not in field_values:
@@ -101,7 +106,7 @@ def _enhance_parameters(vega_chart: dict, df: pd.DataFrame) -> dict:
         field_labels[none_index] = "[All]"
         param_dict["bind"]["labels"] = field_labels
         param_dict["bind"]["name"] = column_name
-        print(f"Yay! We can filter by {column_name} now!")
+        logger.info(f"Added filter capability for column: {column_name}")
     return vega_chart
 
 
@@ -181,6 +186,16 @@ def _safe_json(json_str: str) -> str:
     json_str = json_str.rsplit("}", 1)[0] + "}"
     json_dict = json.loads(json_str)
     return json.dumps(json_dict, default=_json_date_serial)
+
+def _clean_data_for_json(data):
+    """Replace NaN values with null for valid JSON"""
+    if isinstance(data, list):
+        return [_clean_data_for_json(item) for item in data]
+    elif isinstance(data, dict):
+        return {k: _clean_data_for_json(v) for k, v in data.items()}
+    elif isinstance(data, float) and math.isnan(data):
+        return None
+    return data
 
 async def bi_engineer_tool(original_business_question: str,
                      question_that_sql_result_can_answer: str,
@@ -278,12 +293,12 @@ Fix the issues. Redesign the chart if it promises a better result.
 ERROR {type(ex).__name__}: {str(ex)}
 """.strip()
                 error_reason = message
-                print(message)
+                logger.error(message)
                 if not vega_fix_chat:
                     vega_fix_chat = _create_chat(BI_ENGINEER_FIX_AGENT_MODEL_ID,
                                                  vega_chat.get_history(),
                                                  True)
-                print("Fixing...")
+                logger.info("Attempting to fix chart generation error...")
                 chart_json = vega_fix_chat.send_message(
                     message
                 ).parsed.vega_lite_json # type: ignore
@@ -307,7 +322,8 @@ ERROR {type(ex).__name__}: {str(ex)}
         if not error_reason:
             break
 
-        print(f"Feedback:\n{error_reason}.\n\nWorking on another version...")
+        logger.info(f"Chart evaluation feedback: {error_reason}")
+        logger.info("Generating improved chart version...")
         history = (vega_fix_chat.get_history()
                    if vega_fix_chat
                    else vega_chat.get_history())
@@ -327,11 +343,11 @@ ERROR {type(ex).__name__}: {str(ex)}
             ````
             """).parsed.vega_lite_json # type: ignore
 
-    print(f"Done working on a chart.")
+    logger.info("Chart generation completed.")
     if error_reason:
-        print(f"Chart is still not good: {error_reason}")
+        logger.warning(f"Chart has remaining issues: {error_reason}")
     else:
-        print("And the chart seem good to me.")
+        logger.info("Chart generated successfully.")
     data_file_name = f"{tool_context.invocation_id}.parquet"
     parquet_bytes = df.to_parquet()
     await tool_context.save_artifact(filename=data_file_name,
@@ -373,19 +389,69 @@ ERROR {type(ex).__name__}: {str(ex)}
         }
         chart_component = chart_map.get(mark_type, "BarChart")
         
-        # Extract fields from Vega-Lite encoding
+        # Extract fields from Vega-Lite encoding with proper type detection
         encoding = vega_dict.get("encoding", {})
-        x_field = encoding.get("x", {}).get("field", "category")
-        y_field = encoding.get("y", {}).get("field", "value")
+        x_encoding = encoding.get("x", {})
+        y_encoding = encoding.get("y", {})
         
-        # Determine chart element type
-        chart_element = "Bar" if chart_component == "BarChart" else "Line"
+        # Determine which axis has categorical vs quantitative data
+        x_type = x_encoding.get("type", "")
+        y_type = y_encoding.get("type", "")
+        
+        # For bar charts, categorical data should be on x-axis, quantitative on y-axis
+        if x_type in ["nominal", "ordinal"] or (not x_type and y_type in ["quantitative"]):
+            x_field = x_encoding.get("field", "category")
+            y_field = y_encoding.get("field", "value")
+        elif y_type in ["nominal", "ordinal"] or (not y_type and x_type in ["quantitative"]):
+            # Handle horizontal bar charts
+            x_field = y_encoding.get("field", "category")
+            y_field = x_encoding.get("field", "value")
+        else:
+            # Fallback: guess based on field names
+            x_field_name = x_encoding.get("field", "")
+            y_field_name = y_encoding.get("field", "")
+            
+            # Common patterns for categorical fields
+            categorical_patterns = ["source", "category", "type", "name", "label", "group", "status", "stage"]
+            is_x_categorical = any(pattern in x_field_name.lower() for pattern in categorical_patterns)
+            is_y_categorical = any(pattern in y_field_name.lower() for pattern in categorical_patterns)
+            
+            if is_x_categorical and not is_y_categorical:
+                x_field = x_field_name
+                y_field = y_field_name
+            elif is_y_categorical and not is_x_categorical:
+                x_field = y_field_name
+                y_field = x_field_name
+            else:
+                # Default fallback
+                x_field = x_field_name or "category"
+                y_field = y_field_name or "value"
+        
+        # Determine chart element type and additional components
+        if chart_component == "BarChart":
+            chart_element = "Bar"
+            additional_imports = ""
+        elif chart_component == "LineChart":
+            chart_element = "Line"
+            additional_imports = ""
+        elif chart_component == "AreaChart":
+            chart_element = "Area"
+            additional_imports = ""
+        elif chart_component == "ScatterChart":
+            chart_element = "Scatter"
+            additional_imports = ", Scatter"
+        else:
+            chart_element = "Bar"
+            additional_imports = ""
+        
+        # Clean data for JSON serialization
+        cleaned_data = _clean_data_for_json(df.head(50).to_dict('records'))
         
         # Generate React component
         recharts_code = f'''import React from 'react';
-import {{ {chart_component}, {chart_element}, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer }} from 'recharts';
+import {{ {chart_component}, {chart_element}{additional_imports}, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer }} from 'recharts';
 
-const data = {json.dumps(df.head(50).to_dict('records'), indent=2)};
+const data = {json.dumps(cleaned_data, indent=2)};
 
 export default function CRMChart() {{
   return (
