@@ -1,0 +1,523 @@
+manifest:
+  version: "0.1.3"
+  schema: https://a2as.org/cert/schema
+  subject:
+    name: siddhansh-11/crm-data-agent
+    source: https://github.com/siddhansh-11/crm-data-agent
+    branch: main
+    commit: "467c14c5"
+    scope: [src/agents/data_agent/agent.py, src/agents/data_agent/prompts/root_agent.py, src/agents/data_agent/tools/bi_engineer.py,
+      src/agents/data_agent/tools/crm_business_analyst.py, src/agents/data_agent/tools/data_engineer.py, src/agents/data_agent/tools/utils.py,
+      src/mcp_server/server.py, src/web/fast_api_app.py, src/web/fast_api_runner.py]
+  issued:
+    by: A2AS.org
+    at: '2026-02-11T17:06:19Z'
+    url: https://a2as.org/certified/agents/siddhansh-11/crm-data-agent
+  signatures:
+    digest: sha256:lKuHQq6Pcny78x0qaRVwEKXRacUnNXDwEJpXcJPO9RU
+    key: ed25519:BUeQB_FlHOmIr6doIDDZttV6yQ3mxs58yAu_vobmqd8
+    sig: ed25519:gckD2f5K1Ol9QB9B679KCzXK9lpSxfPG756C36LRDRFMRuEQxOqHGAxx6DBdQOaMNNndLadMp2R0tAghCKShAA
+
+agents:
+  crm_business_analyst_agent:
+    type: instance
+    models: [get_gemini_model]
+    params:
+      name: crm_business_analyst
+      description: "\n        This is your Senior Business Analyst.\n\n        They can analyze your questions about business\n\
+        \        no matter what form these questions are in.\n\n        Questions may be different:\n            - Directly\
+        \ linked to business data (e.g. \"Revenue by country\")\n            - Open to interpretation (e.g. \"Who are my best\
+        \ customers\").\n\n        They figure out what metrics, dimensions and KPIs\n        could be used to answer the\
+        \ question.\n\n        They may offer a few options.\n        "
+      instruction: crm_business_analyst_instruction
+      generate_content_config:
+        class: GenerateContentConfig
+        temperature: "0.0"
+        top_p: "0.0"
+        seed: "1"
+        safety_settings: ['SafetySetting(category=HARM_CATEGORY_DANGEROUS_CONTENT, threshold=BLOCK_ONLY_HIGH)']
+      planner: BuiltInPlanner
+      after_model_callback: after_model_callback
+  root_agent:
+    type: instance
+    models: [get_gemini_model]
+    tools: [agent_tool, data_engineer, bi_engineer_tool]
+    params:
+      name: data_agent
+      output_key: output
+      description: CRM Data Analytics Consultant
+      instruction: root_agent_instruction
+      before_model_callback: before_model_callback
+      after_model_callback: after_model_callback
+      before_agent_callback: before_agent_callback
+      planner: BuiltInPlanner
+      generate_content_config:
+        class: GenerateContentConfig
+        temperature: "0.0001"
+        top_p: "0.0"
+        seed: "256"
+        safety_settings: ['SafetySetting(category=HARM_CATEGORY_DANGEROUS_CONTENT, threshold=BLOCK_ONLY_HIGH)']
+
+models:
+  get_gemini_model:
+    type: function
+    agents: [root_agent, crm_business_analyst_agent]
+    params:
+      wrapper: get_gemini_model
+      arg_0: gemini-2.5-pro
+
+tools:
+  agent_tool:
+    type: agent
+    agents: [root_agent]
+    params:
+      wrapper: AgentTool
+  bi_engineer_tool:
+    type: function
+    agents: [root_agent]
+    params:
+      description: |-
+        Senior BI Engineer. Executes SQL code.
+
+        Args:
+            original_business_question (str): Original business question.
+            question_that_sql_result_can_answer (str):
+                Specific question or sub-question that SQL result can answer.
+            sql_file_name (str): File name of BigQuery SQL code execute.
+            notes (str): Important notes about the chart. Not empty only if the user stated something directly related to the chart.
+
+        Returns:
+            str: Chart image id and the result of executing the SQL code
+                 in CSV format (first 50 rows).
+  data_engineer:
+    type: function
+    agents: [root_agent]
+    params:
+      description: |-
+        This is your Senior Data Engineer.
+        They have extensive experience in working with CRM data.
+        They write clean and efficient SQL in its BigQuery dialect.
+        When given a question or a set of steps,
+        they can understand whether the problem can be solved with the data you have.
+        The result is a BigQuery SQL Query.
+
+imports:
+  Agent: google.adk.agents.llm_agent.Agent
+  agent: agents.data_agent.agent.root_agent
+  AgentTool: google.adk.tools.agent_tool.AgentTool
+  alt: altair
+  alt_core: altair.vegalite.schema.core
+  Any: typing.Any
+  anyio: anyio
+  asynccontextmanager: contextlib.asynccontextmanager
+  AsyncGenerator: typing.AsyncGenerator
+  asyncio: asyncio
+  BadRequest: google.cloud.exceptions.BadRequest
+  BaseArtifactService: google.adk.artifacts.BaseArtifactService
+  BaseModel: pydantic.BaseModel
+  bi_engineer_prompt: prompts.bi_engineer.prompt
+  bi_engineer_tool: tools.bi_engineer.bi_engineer_tool
+  BuiltInPlanner: google.adk.planners.BuiltInPlanner
+  cache: functools.cache
+  cached_property: functools.cached_property
+  CallbackContext: google.adk.agents.callback_context.CallbackContext
+  Client: google.cloud.bigquery.Client
+  CloudTraceSpanExporter: opentelemetry.exporter.cloud_trace.CloudTraceSpanExporter
+  Content: google.genai.types.Content
+  contextlib: contextlib
+  CORSMiddleware: fastapi.middleware.cors.CORSMiddleware
+  crm_business_analyst_agent: tools.crm_business_analyst.crm_business_analyst_agent
+  crm_business_analyst_instruction: prompts.crm_business_analyst.system_instruction
+  data_engineer: tools.data_engineer.data_engineer
+  data_engineer_instruction: prompts.data_engineer.system_instruction
+  data_engineer_prompt: prompts.data_engineer.prompt
+  date: datetime.date
+  datetime: datetime.datetime
+  Dict: typing.Dict
+  evaluate_chart: tools.chart_evaluator.evaluate_chart
+  Event: google.adk.events.Event
+  export: opentelemetry.sdk.trace.export
+  FastAPI: fastapi.FastAPI
+  FirestoreSessionService: shared.firestore_session_service.FirestoreSessionService
+  GcsArtifactService: google.adk.artifacts.GcsArtifactService
+  Gemini: google.adk.models.Gemini
+  genai: google.genai
+  GenerateContentConfig: google.genai.types.GenerateContentConfig
+  get_fast_api_app: fast_api_app.get_fast_api_app
+  get_gemini_model: tools.utils.get_gemini_model
+  get_genai_client: utils.get_genai_client
+  HTTPException: fastapi.HTTPException
+  importlib: importlib
+  InMemoryArtifactService: google.adk.artifacts.InMemoryArtifactService
+  InMemoryMemoryService: google.adk.memory.InMemoryMemoryService
+  inspect: inspect
+  io: io
+  json: json
+  Lifespan: starlette.types.Lifespan
+  List: typing.List
+  Literal: typing.Literal
+  LiveRequest: google.adk.agents.live_request_queue.LiveRequest
+  LiveRequestQueue: google.adk.agents.live_request_queue.LiveRequestQueue
+  LlmAgent: google.adk.agents.LlmAgent
+  LlmRequest: google.adk.models.LlmRequest
+  LlmResponse: google.adk.models.LlmResponse
+  load_dotenv: dotenv.load_dotenv
+  Lock: threading.Lock
+  logging: logging
+  main: mcp_server.server.main
+  math: math
+  NotFound: google.cloud.exceptions.NotFound
+  Optional: typing.Optional
+  os: os
+  override: typing_extensions.override
+  Part: google.genai.types.Part
+  Path: pathlib.Path
+  pd: pandas
+  prepare_environment: shared.config_env.prepare_environment
+  Query: fastapi.Query
+  QueryJobConfig: google.cloud.bigquery.QueryJobConfig
+  ReadableSpan: opentelemetry.sdk.trace.ReadableSpan
+  root_agent: agent.root_agent
+  root_agent_instruction: prompts.root_agent.system_instruction
+  RunConfig: google.adk.agents.RunConfig
+  Runner: google.adk.runners.Runner
+  SafetySetting: google.genai.types.SafetySetting
+  Server: mcp.server.Server
+  Session: google.adk.sessions.Session
+  SessionService: shared.firestore_session_service.FirestoreSessionService
+  sql_correction_instruction: prompts.sql_correction.instruction
+  sql_correction_prompt: prompts.sql_correction.prompt
+  stdio_server: mcp.server.stdio.stdio_server
+  StreamingMode: google.adk.agents.run_config.StreamingMode
+  StreamingResponse: fastapi.responses.StreamingResponse
+  StringIO: io.StringIO
+  sys: sys
+  ThinkingConfig: google.genai.types.ThinkingConfig
+  ToolContext: google.adk.tools.ToolContext
+  trace: opentelemetry.trace
+  traceback: traceback
+  TracerProvider: opentelemetry.sdk.trace.TracerProvider
+  Tuple: typing.Tuple
+  types: mcp.types
+  typing: typing
+  uuid: uuid
+  ValidationError: pydantic.ValidationError
+  WebSocket: fastapi.websockets.WebSocket
+  WebSocketDisconnect: fastapi.websockets.WebSocketDisconnect
+
+functions:
+  __init__:
+    type: sync
+    module: src.web.fast_api_app
+    args: [self, trace_dict]
+  _clean_data_for_json:
+    type: sync
+    module: src.agents.data_agent.tools.bi_engineer
+    args: [data]
+  _create_chat:
+    type: sync
+    module: src.agents.data_agent.tools.bi_engineer
+    args: [model, history, max_thinking]
+  _enhance_parameters:
+    type: sync
+    module: src.agents.data_agent.tools.bi_engineer
+    args: [vega_chart, df]
+    params:
+      returns: dict
+  _fix_df_dates:
+    type: sync
+    module: src.agents.data_agent.tools.bi_engineer
+    args: [df]
+    params:
+      returns: pd.DataFrame
+  _get_root_agent_async:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name]
+    params:
+      returns: Agent
+  _get_runner_async:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name]
+    params:
+      returns: Runner
+  _init_environment:
+    type: sync
+    module: src.agents.data_agent.tools.data_engineer
+  _json_date_serial:
+    type: sync
+    module: src.agents.data_agent.tools.bi_engineer
+    args: [obj]
+  _safe_json:
+    type: sync
+    module: src.agents.data_agent.tools.bi_engineer
+    args: [json_str]
+    params:
+      returns: str
+  _sql_validator:
+    type: sync
+    module: src.agents.data_agent.tools.data_engineer
+    args: [sql_code]
+    params:
+      returns: Tuple
+  after_model_callback:
+    type: async
+    module: src.agents.data_agent.tools.crm_business_analyst
+    args: [callback_context, llm_response]
+  agent_live_run:
+    type: async
+    module: src.web.fast_api_app
+    args: [websocket, app_name, user_id, session_id, modalities]
+    params:
+      returns: None
+  agent_run:
+    type: async
+    module: src.web.fast_api_app
+    args: [req]
+    params:
+      returns: list[Event]
+  agent_run_sse:
+    type: async
+    module: src.web.fast_api_app
+    args: [req]
+    params:
+      returns: StreamingResponse
+  api_client:
+    type: sync
+    module: src.agents.data_agent.tools.utils
+    args: [self]
+    params:
+      returns: genai.Client
+  before_agent_callback:
+    type: async
+    module: src.agents.data_agent.agent
+    args: [callback_context]
+    params:
+      returns: Optional[Content]
+  before_model_callback:
+    type: async
+    module: src.agents.data_agent.agent
+    args: [callback_context, llm_request]
+  bi_engineer_tool:
+    type: async
+    module: src.agents.data_agent.tools.bi_engineer
+    args: [original_business_question, question_that_sql_result_can_answer, sql_file_name, notes, tool_context]
+    params:
+      returns: str
+  call_tool:
+    type: tool
+    module: src.mcp_server.server
+    args: [name, arguments]
+    params:
+      returns: List[types.TextContent]
+  capture_stdout:
+    type: sync
+    module: src.mcp_server.server
+  create_session:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, state]
+    params:
+      returns: Session
+  create_session_with_id:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id, state]
+    params:
+      returns: Session
+  data_engineer:
+    type: async
+    module: src.agents.data_agent.tools.data_engineer
+    args: [request, tool_context]
+    params:
+      returns: SQLResult
+  delete_artifact:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id, artifact_name]
+  delete_session:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id]
+  event_generator:
+    type: async
+    module: src.web.fast_api_app
+  export:
+    type: sync
+    module: src.web.fast_api_app
+    args: [self, spans]
+    params:
+      returns: export.SpanExportResult
+  force_flush:
+    type: sync
+    module: src.web.fast_api_app
+    args: [self, timeout_millis]
+    params:
+      returns: bool
+  format_agent_workflow:
+    type: sync
+    module: src.mcp_server.server
+    args: [question, function_calls, function_responses, final_response]
+    params:
+      returns: str
+  forward_events:
+    type: async
+    module: src.web.fast_api_app
+  generate_content_async:
+    type: async
+    module: src.agents.data_agent.tools.utils
+    args: [self, llm_request, stream]
+    params:
+      returns: AsyncGenerator
+  get_fast_api_app:
+    type: sync
+    module: src.web.fast_api_app
+    params:
+      returns: FastAPI
+  get_gemini_model:
+    type: sync
+    module: src.agents.data_agent.tools.utils
+    args: [model_id]
+    params:
+      returns: Gemini
+  get_genai_client:
+    type: sync
+    module: src.agents.data_agent.tools.utils
+    args: [model_id]
+    params:
+      returns: genai.Client
+  get_session:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id]
+    params:
+      returns: Session
+  get_shared_lock:
+    type: sync
+    module: src.agents.data_agent.tools.utils
+    params:
+      returns: Lock
+  get_trace_dict:
+    type: sync
+    module: src.web.fast_api_app
+    args: [event_id]
+    params:
+      returns: Any
+  handle_crm_analysis:
+    type: async
+    module: src.mcp_server.server
+    args: [arguments]
+    params:
+      returns: List[types.TextContent]
+  handle_crm_insights:
+    type: async
+    module: src.mcp_server.server
+    args: [arguments]
+    params:
+      returns: List[types.TextContent]
+  initialize_services:
+    type: async
+    module: src.mcp_server.server
+  internal_lifespan:
+    type: async
+    module: src.web.fast_api_app
+    args: [app]
+  list_artifact_names:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id]
+    params:
+      returns: list[str]
+  list_artifact_versions:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id, artifact_name]
+    params:
+      returns: list[int]
+  list_sessions:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id]
+    params:
+      returns: list[Session]
+  list_tools:
+    type: tool
+    module: src.mcp_server.server
+    params:
+      returns: List[types.Tool]
+  load_artifact:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id, artifact_name, version]
+    params:
+      returns: Optional[types.Part]
+  load_artifact_version:
+    type: async
+    module: src.web.fast_api_app
+    args: [app_name, user_id, session_id, artifact_name, version_id]
+    params:
+      returns: Optional[types.Part]
+  main:
+    type: async
+    module: src.mcp_server.server
+  process_messages:
+    type: async
+    module: src.web.fast_api_app
+
+variables:
+  AGENT_DIR:
+    type: env
+    params:
+      caller: [os.environ]
+  AI_STORAGE_BUCKET:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [env_file]
+  CALLER_SOURCE:
+    type: env
+    params:
+      caller: [os.environ.get, os.environ]
+      path: [src.agents.data_agent.tools.bi_engineer]
+  FIRESTORE_SESSION_COLLECTION:
+    type: env
+    params:
+      caller: [os.getenv]
+      path: [src.web.fast_api_app]
+  FIRESTORE_SESSION_DATABASE:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [env_file]
+  GOOGLE_APPLICATION_CREDENTIALS:
+    type: env
+    params:
+      caller: [os.environ]
+  GOOGLE_CLOUD_PROJECT:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [src.web.fast_api_app, env_file]
+  SFDC_METADATA_FILE:
+    type: env
+    params:
+      caller: [os.environ.get]
+      path: [src.agents.data_agent.tools.data_engineer]
+
+files:
+  .env:
+    type: literal
+    actions: [read]
+    params:
+      path: [project_root]
+  service-account-key.json:
+    type: literal
+    actions: [read]
+    params:
+      path: [project_root]
+  SFDC_METADATA_FILE:
+    type: variable
+    actions: [read]
+    params:
+      caller: [Path]
